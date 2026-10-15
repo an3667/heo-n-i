@@ -1,0 +1,685 @@
+<!DOCTYPE html>
+<html lang="vi">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Kawaii Forest Adventure</title>
+<style>
+*{box-sizing:border-box}
+body{
+  margin:0;padding:12px;
+  font-family:system-ui,sans-serif;
+  color:#593d36;
+  background:#fff7e8;
+  text-align:center
+}
+h1{margin:8px 0;color:#d77e9d;font-size:clamp(25px,5vw,42px)}
+.subtitle{margin:0 0 12px;color:#8d7465;font-size:14px}
+#hud{
+  max-width:960px;margin:0 auto 10px;
+  display:flex;justify-content:center;gap:8px;flex-wrap:wrap
+}
+.badge{
+  padding:9px 14px;border-radius:18px;
+  background:#fffdf7;border:2px solid #e8cbb7;
+  font-weight:800
+}
+#wrap{
+  position:relative;max-width:960px;margin:auto;
+  border:4px solid #735148;border-radius:18px;
+  overflow:hidden;background:#d9f0d9;
+  box-shadow:0 7px 0 #d8b8a0
+}
+canvas{display:block;width:100%;height:auto;touch-action:none}
+#overlay{
+  position:absolute;inset:0;
+  display:flex;align-items:center;justify-content:center;
+  padding:14px;background:#fff8e3c9
+}
+#overlay.hidden{display:none}
+.dialog{
+  width:min(400px,100%);padding:20px;
+  background:#fffdf6;border:3px solid #735148;
+  border-radius:25px;box-shadow:0 6px 0 #d8b8a0
+}
+.dialog .emoji{font-size:48px}
+.dialog h2{margin:8px 0;color:#cf7996}
+.dialog p{line-height:1.55;color:#80675c}
+button{
+  padding:11px 15px;margin:3px;
+  border:2px solid #735148;border-radius:15px;
+  background:#ffe4a8;color:#593d36;
+  font-weight:800;font-size:14px;cursor:pointer;
+  touch-action:manipulation
+}
+button:active{transform:translateY(2px)}
+.primary{background:#f6a9c2}
+#controls{
+  max-width:460px;margin:12px auto;
+  display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px
+}
+#controls button{padding:12px 4px;font-size:20px;min-height:54px}
+#controls span{display:block;font-size:11px}
+.hint{font-size:12px;color:#8d7465;margin:12px auto;max-width:800px}
+@media(min-width:750px){#controls{max-width:340px}}
+</style>
+</head>
+<body>
+
+<h1>🌷 Kawaii Forest Adventure 🌷</h1>
+<p class="subtitle">Một cuộc phiêu lưu nhỏ trong khu rừng pastel!</p>
+
+<div id="hud">
+  <div class="badge" id="level">🌳 Màn 1/4</div>
+  <div class="badge" id="coins">🪙 Xu: 0</div>
+  <div class="badge" id="lives">💗 Mạng: 3</div>
+  <div class="badge" id="score">⭐ Điểm: 0</div>
+</div>
+
+<div id="wrap">
+  <canvas id="game" width="960" height="540"></canvas>
+  <div id="overlay">
+    <div class="dialog">
+      <div class="emoji" id="emoji">🐰🌼</div>
+      <h2 id="title">Chào mừng đến khu rừng!</h2>
+      <p id="message">
+        Hãy chạy, nhảy qua các bục, thu thập xu và tránh những quái vật nhỏ.
+        Tìm chiếc cổng hoa ở cuối mỗi màn nhé!
+      </p>
+      <button class="primary" id="mainButton">Bắt đầu chơi 🌸</button>
+    </div>
+  </div>
+</div>
+
+<div id="controls">
+  <button id="left">⬅️<span>SANG TRÁI</span></button>
+  <button id="jump">🐰<span>NHẢY</span></button>
+<button id="right">➡️<span>SANG PHẢI</span></button>
+</div>
+
+<div>
+  <button id="pause">⏸ Tạm dừng</button>
+  <button id="sound">🔊 Âm thanh: Bật</button>
+  <button id="restart">↻ Chơi lại</button>
+</div>
+
+<p class="hint">
+  Máy tính: A/D hoặc phím mũi tên để di chuyển, Space để nhảy.
+  Điện thoại: sử dụng các nút bên dưới game.
+  Nhảy lên đầu quái vật để đánh bại chúng!
+</p>
+
+<script>
+(() => {
+"use strict";
+
+const canvas = document.querySelector("#game");
+const ctx = canvas.getContext("2d");
+const W = 960, H = 540;
+const $ = id => document.getElementById(id);
+
+const overlay = $("overlay");
+const mainButton = $("mainButton");
+const player = {
+  x:45,y:350,w:42,h:43,vx:0,vy:0,
+  ground:false,dir:1,walk:0
+};
+
+let scene = "menu";
+let stage = 0, score = 0, coins = 0, lives = 3;
+let camera = 0, lastTime = 0, time = 0;
+let platforms = [], treasures = [], monsters = [], particles = [];
+let gate, checkpoint = 45, invincible = 0;
+let soundOn = true, audio = null;
+let jumpPressed = false;
+const keys = {left:false,right:false};
+
+const stages = [
+ {
+  name:"Khu rừng bánh kem", width:2100,
+  platforms:[
+   [0,465,400,90],[465,430,230,110],[755,465,280,75],
+   [1090,410,250,130],[1400,460,250,80],[1720,425,380,115],
+   [400,370,75,18],[820,360,100,18],[1150,310,90,18],
+   [1470,340,95,18],[1790,320,100,18]
+  ],
+  coins:[[130,420],[220,420],[320,420],[510,385],[570,385],
+   [850,320],[900,320],[1150,270],[1200,270],[1460,300],
+   [1510,300],[1780,280],[1840,280],[1920,380],[2000,380]],
+  enemies:[[520,402,480,665],[850,437,770,990],[1480,432,1410,1610]],
+  exit:[2010,350]
+ },
+ {
+  name:"Thung lũng hoa",width:2350,
+  platforms:[
+   [0,465,320,90],[385,430,230,110],[680,460,250,80],
+   [990,405,270,135],[1320,455,260,85],[1650,405,260,135],
+   [1970,450,380,90],[300,350,80,18],[520,310,90,18],
+   [750,350,90,18],[1060,300,95,18],[1390,335,90,18],
+   [1740,290,95,18],[2030,320,90,18]
+  ],
+  coins:[[95,420],[200,420],[330,310],[550,270],[600,270],
+   [760,310],[820,310],[1080,260],[1140,260],[1410,295],
+   [1470,295],[1750,250],[1810,250],[2050,275],[2120,400],[2250,400]],
+  enemies:[[430,402,395,585],[730,432,695,900],[1030,377,1005,1210],
+   [1700,377,1665,1870]],
+  exit:[2280,370]
+ },
+ {
+  name:"Đồi mây bông",width:2500,
+  platforms:[
+   [0,465,330,90],[400,420,230,120],[700,460,240,80],
+   [1010,410,240,130],[1325,450,250,90],[1640,400,260,140],
+   [1970,455,530,85],[320,340,80,18],[480,295,85,18],
+   [760,340,90,18],[1070,290,100,18],[1400,320,90,18],
+   [1730,280,100,18],[2050,325,90,18],[2250,350,90,18]
+  ],
+  coins:[[100,420],[220,420],[350,300],[520,255],[570,255],
+   [780,300],[830,300],[1090,250],[1150,250],[1420,280],
+   [1480,280],[1760,240],[1820,240],[2070,285],[2140,285],
+   [2280,310],[2350,405],[2430,405]],
+  enemies:[[430,392,410,590],[740,432,710,900],[1060,367,1030,1220],
+   [1690,357,1660,1870],[2050,412,2000,2200]],
+  exit:[2435,370]
+ },
+ {
+  name:"Lâu đài kẹo ngọt",width:2750,
+platforms:[
+   [0,465,300,90],[370,425,210,115],[650,380,180,18],
+   [900,440,230,100],[1200,390,185,18],[1450,450,220,90],
+   [1740,395,200,18],[2000,440,220,100],[2290,380,180,18],
+   [2520,430,230,110],[280,340,70,18],[720,300,80,18],
+   [990,330,85,18],[1260,295,90,18],[1510,330,85,18],
+   [1800,290,85,18],[2070,330,85,18],[2350,285,90,18],
+   [2570,320,90,18]
+  ],
+  coins:[[100,420],[210,420],[290,295],[420,375],[680,255],
+   [740,255],[950,390],[1020,390],[1230,255],[1290,255],
+   [1500,290],[1560,290],[1780,245],[1840,245],
+   [2030,390],[2100,390],[2330,245],[2390,245],
+   [2600,275],[2670,385]],
+  enemies:[[395,397,380,550],[930,397,920,1090],[1475,407,1460,1635],
+   [2025,397,2010,2185],[2550,387,2535,2700]],
+  exit:[2690,350]
+ }
+];
+
+function playTone(freq,duration=.09,type="sine"){
+ if(!soundOn)return;
+ try{
+  audio ||= new (window.AudioContext || window.webkitAudioContext)();
+  if(audio.state==="suspended") audio.resume();
+  const o=audio.createOscillator(),g=audio.createGain();
+  o.type=type;o.frequency.value=freq;
+  g.gain.setValueAtTime(.04,audio.currentTime);
+  g.gain.exponentialRampToValueAtTime(.001,audio.currentTime+duration);
+  o.connect(g);g.connect(audio.destination);
+  o.start();o.stop(audio.currentTime+duration);
+ }catch(e){}
+}
+function sfx(name){
+ if(name==="coin"){playTone(760);setTimeout(()=>playTone(1050),55)}
+ if(name==="jump")playTone(330,.12,"triangle");
+ if(name==="hurt")playTone(150,.22,"triangle");
+ if(name==="stomp")playTone(220,.1);
+ if(name==="win"){playTone(520);setTimeout(()=>playTone(780),100)}
+}
+
+function loadStage(n){
+ stage=n;
+ const s=stages[n];
+ platforms=s.platforms.map(p=>({x:p[0],y:p[1],w:p[2],h:p[3]}));
+ treasures=s.coins.map((c,i)=>({x:c[0],y:c[1],got:false,phase:i}));
+ monsters=s.enemies.map((e,i)=>({
+  x:e[0],y:e[1],min:e[2],max:e[3],dir:i%2? -1:1,
+  w:39,h:31,alive:true,speed:45+i%3*12,phase:i
+ }));
+ gate={x:s.exit[0],y:s.exit[1],w:42,h:72};
+ checkpoint=45;camera=0;
+ player.x=45;player.y=370;player.vx=0;player.vy=0;
+ particles=[];
+ updateHud();
+}
+
+function updateHud(){
+ $("level").textContent=`🌳 Màn ${stage+1}/${stages.length}`;
+ $("coins").textContent=`🪙 Xu: ${coins}`;
+ $("lives").textContent=`💗 Mạng: ${lives}`;
+ $("score").textContent=`⭐ Điểm: ${score}`;
+}
+
+function showScreen(kind,title,message,emoji,button){
+ scene=kind;
+ overlay.classList.remove("hidden");
+ $("title").textContent=title;
+ $("message").textContent=message;
+ $("emoji").textContent=emoji;
+ mainButton.textContent=button;
+}
+function startGame(){
+ stage=0;score=0;coins=0;lives=3;time=0;invincible=0;
+ loadStage(0);scene="playing";overlay.classList.add("hidden");
+ $("pause").textContent="⏸ Tạm dừng";
+ sfx("win");lastTime=performance.now();requestAnimationFrame(loop);
+}
+function nextStage(){
+ score+=10;sfx("win");
+ if(stage===stages.length-1){
+  updateHud();
+  showScreen("complete","Bạn đã phá đảo! 🏆",
+`Tuyệt vời! Bạn đã vượt qua ${stages.length} màn, thu thập ${coins} xu và đạt ${score} điểm!`,
+   "👑🌸","Chơi lại từ đầu");
+ }else{
+  showScreen("next",`Hoàn thành màn ${stage+1}!`,
+   "Chiếc cổng hoa đã mở. Hãy tiếp tục hành trình đến vùng đất mới nhé!",
+   "🌷🚪","Sang màn tiếp theo");
+ }
+}
+function loseLife(){
+ if(invincible>0)return;
+ lives--;invincible=1.4;player.vy=-280;
+ player.x=Math.max(checkpoint,player.x-75);
+ player.y=260;player.vx=0;
+ burst(player.x+20,player.y+20,"#f29cb4",12);
+ sfx("hurt");updateHud();
+ if(lives<=0){
+  showScreen("over","Ôi, hết mạng rồi!",
+   `Bạn đã thu thập ${coins} xu và đạt ${score} điểm. Thử lại nhé!`,
+   "🥺🌧️","Chơi lại");
+ }
+}
+
+function burst(x,y,color,n=12){
+ for(let i=0;i<n;i++){
+  const a=Math.random()*Math.PI*2,s=45+Math.random()*140;
+  particles.push({
+   x,y,vx:Math.cos(a)*s,vy:Math.sin(a)*s,
+   life:.35+Math.random()*.45,max:.8,
+   r:2+Math.random()*3,color
+  });
+ }
+}
+function overlap(a,b){
+ return a.x<b.x+b.w && a.x+a.w>b.x &&
+        a.y<b.y+b.h && a.y+a.h>b.y;
+}
+
+function update(dt){
+ time+=dt;
+ if(invincible>0)invincible-=dt;
+
+ player.vx=0;
+ if(keys.left){player.vx=-255;player.dir=-1}
+ if(keys.right){player.vx=255;player.dir=1}
+
+ if(jumpPressed&&player.ground){
+  player.vy=-650;player.ground=false;sfx("jump");
+ }
+ jumpPressed=false;
+
+ const oldX=player.x,oldY=player.y;
+ player.x+=player.vx*dt;
+ const worldWidth=stages[stage].width;
+ player.x=Math.max(0,Math.min(worldWidth-player.w,player.x));
+
+ // Va chạm ngang
+ for(const p of platforms){
+  if(!overlap(player,p))continue;
+  if(player.vx>0&&oldX+player.w<=p.x+6)player.x=p.x-player.w;
+  else if(player.vx<0&&oldX>=p.x+p.w-6)player.x=p.x+p.w;
+ }
+
+ player.vy+=1650*dt;
+ player.y+=player.vy*dt;
+ player.ground=false;
+
+ // Va chạm dọc
+ for(const p of platforms){
+  if(!overlap(player,p))continue;
+  if(player.vy>=0&&oldY+player.h<=p.y+12){
+   player.y=p.y-player.h;player.vy=0;player.ground=true;
+  }else if(player.vy<0&&oldY>=p.y+p.h-8){
+   player.y=p.y+p.h;player.vy=0;
+  }
+ }
+
+ if(player.y>H+100){
+  loseLife();
+  if(scene!=="playing")return;
+ }
+
+ // Nhặt xu
+ for(const c of treasures){
+  if(c.got)continue;
+  const dx=player.x+player.w/2-c.x;
+  const dy=player.y+player.h/2-c.y;
+  if(Math.hypot(dx,dy)<29){
+   c.got=true;coins++;score+=10;
+   burst(c.x,c.y,"#ffd66e",14);sfx("coin");updateHud();
+  }
+ }
+
+ // Quái vật dễ thương đi tuần
+ for(const m of monsters){
+  if(!m.alive)continue;
+  m.x+=m.dir*m.speed*dt;
+  if(m.x<m.min){m.x=m.min;m.dir=1}
+  if(m.x+m.w>m.max){m.x=m.max-m.w;m.dir=-1}
+
+  if(overlap(player,{x:m.x,y:m.y,w:m.w,h:m.h})){
+   if(player.vy>80&&oldY+player.h<=m.y+13){
+    m.alive=false;player.vy=-350;score+=25;
+    burst(m.x+20,m.y+15,"#c2a5ee",18);
+    sfx("stomp");updateHud();
+   }else loseLife();
+  }
+  if(scene!=="playing")return;
+ }
+
+ if(overlap(player,gate)){nextStage();return}
+
+ camera=Math.max(0,Math.min(worldWidth-W,player.x-W*.36));
+
+ for(let i=particles.length-1;i>=0;i--){
+const p=particles[i];p.x+=p.vx*dt;p.y+=p.vy*dt;
+  p.vy+=160*dt;p.life-=dt;
+  if(p.life<=0)particles.splice(i,1);
+ }
+}
+
+function strokeShape(){
+ ctx.lineWidth=5;ctx.strokeStyle="#593d36";
+ ctx.lineJoin="round";ctx.lineCap="round";
+}
+function line(points){
+ ctx.beginPath();ctx.moveTo(points[0][0],points[0][1]);
+ for(let i=1;i<points.length;i++)ctx.lineTo(points[i][0],points[i][1]);
+ ctx.stroke();
+}
+
+// Nhân vật nguyên bản: linh thú tròn màu kem, má hồng và tai lá.
+function drawHero(x,y,t){
+ ctx.save();ctx.translate(x+player.w/2,y+player.h/2);
+ if(player.dir<0)ctx.scale(-1,1);
+ const bob=player.ground&&Math.abs(player.vx)>0?Math.sin(t*.02)*2:0;
+ ctx.translate(0,bob);
+
+ if(invincible>0&&Math.floor(time*12)%2===0){ctx.globalAlpha=.35}
+
+ strokeShape();
+
+ // Hai tai nhỏ mềm như chiếc lá
+ ctx.fillStyle="#fff4d9";
+ ctx.beginPath();
+ ctx.ellipse(-11,-15,7,14,-.5,0,Math.PI*2);ctx.fill();ctx.stroke();
+ ctx.fillStyle="#f4b8c8";
+ ctx.beginPath();ctx.ellipse(-11,-15,3,8,-.5,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle="#fff4d9";
+ ctx.beginPath();
+ ctx.ellipse(11,-16,7,13,.4,0,Math.PI*2);ctx.fill();ctx.stroke();
+ ctx.fillStyle="#f4b8c8";
+ ctx.beginPath();ctx.ellipse(11,-16,3,7,.4,0,Math.PI*2);ctx.fill();
+
+ // Chân bé xíu
+ ctx.fillStyle="#fff0d7";
+ ctx.beginPath();ctx.ellipse(-9,17,8,6,-.12,0,Math.PI*2);ctx.fill();ctx.stroke();
+ ctx.beginPath();ctx.ellipse(9,17,8,6,.12,0,Math.PI*2);ctx.fill();ctx.stroke();
+
+ // Thân tròn mũm mĩm
+ ctx.fillStyle="#fffaf0";
+ ctx.beginPath();
+ ctx.moveTo(-18,-7);
+ ctx.bezierCurveTo(-24,-20,-13,-29,0,-28);
+ ctx.bezierCurveTo(17,-29,24,-17,20,-4);
+ ctx.bezierCurveTo(24,7,15,20,0,20);
+ ctx.bezierCurveTo(-17,20,-24,8,-18,-7);
+ ctx.closePath();ctx.fill();ctx.stroke();
+
+ // Hai tay nhỏ
+ ctx.fillStyle="#fffaf0";
+ ctx.beginPath();ctx.ellipse(-20,5,5,8,-.45,0,Math.PI*2);ctx.fill();ctx.stroke();
+ ctx.beginPath();ctx.ellipse(20,5,5,8,.45,0,Math.PI*2);ctx.fill();ctx.stroke();
+
+ // Má hồng
+ ctx.fillStyle="#f4a9b8";
+ ctx.beginPath();ctx.ellipse(-11,1,5,3,0,0,Math.PI*2);ctx.fill();
+ ctx.beginPath();ctx.ellipse(12,1,5,3,0,0,Math.PI*2);ctx.fill();
+
+ // Mắt tròn nhỏ
+ ctx.fillStyle="#49332f";
+ ctx.beginPath();ctx.ellipse(-6,-6,2.4,3.4,0,0,Math.PI*2);ctx.fill();
+ ctx.beginPath();ctx.ellipse(7,-6,2.4,3.4,0,0,Math.PI*2);ctx.fill();
+
+ // Miệng cười nhỏ
+ ctx.strokeStyle="#593d36";ctx.lineWidth=2.6;
+ ctx.beginPath();ctx.moveTo(-3,1);
+ ctx.quadraticCurveTo(0,7,4,1);ctx.stroke();
+ ctx.fillStyle="#d9828e";
+ ctx.beginPath();ctx.ellipse(0,4,2,2.6,0,0,Math.PI*2);ctx.fill();
+
+ // Một chiếc lá nhỏ trên đầu
+ ctx.fillStyle="#a4c879";ctx.lineWidth=3;
+ ctx.beginPath();ctx.ellipse(0,-29,7,3.5,-.45,0,Math.PI*2);ctx.fill();ctx.stroke();
+ ctx.restore();
+}
+
+// Quái vật blob tím, tròn và vô hại về ngoại hình.
+function drawMonster(m){
+ if(!m.alive)return;
+ const x=m.x-camera,y=m.y;
+ ctx.save();ctx.translate(x+m.w/2,y+m.h/2);
+ ctx.scale(m.dir<0?-1:1,1);
+ const bob=Math.sin(time*5+m.x)*2;
+ ctx.translate(0,bob);strokeShape();
+ctx.fillStyle="#c7b3ec";
+ ctx.beginPath();
+ ctx.moveTo(-19,9);
+ ctx.quadraticCurveTo(-24,-8,-14,-14);
+ ctx.quadraticCurveTo(-6,-23,0,-16);
+ ctx.quadraticCurveTo(13,-23,18,-10);
+ ctx.quadraticCurveTo(24,0,18,10);
+ ctx.quadraticCurveTo(8,17,-8,15);
+ ctx.quadraticCurveTo(-17,15,-19,9);
+ ctx.closePath();ctx.fill();ctx.stroke();
+
+ // Chóp mềm
+ ctx.fillStyle="#b19adc";
+ ctx.beginPath();ctx.moveTo(-8,-15);ctx.quadraticCurveTo(-10,-25,-3,-22);
+ ctx.quadraticCurveTo(2,-19,2,-15);ctx.fill();ctx.stroke();
+
+ ctx.fillStyle="#593d36";
+ ctx.beginPath();ctx.ellipse(-6,-3,2.3,3,0,0,Math.PI*2);ctx.fill();
+ ctx.beginPath();ctx.ellipse(7,-3,2.3,3,0,0,Math.PI*2);ctx.fill();
+ ctx.fillStyle="#eca0b5";
+ ctx.beginPath();ctx.ellipse(-12,3,4,2.5,0,0,Math.PI*2);ctx.fill();
+ ctx.beginPath();ctx.ellipse(13,3,4,2.5,0,0,Math.PI*2);ctx.fill();
+ ctx.strokeStyle="#593d36";ctx.lineWidth=2.5;
+ ctx.beginPath();ctx.arc(1,2,4,.2,Math.PI-.2);ctx.stroke();
+ ctx.restore();
+}
+
+function drawBackground(){
+ const sky=ctx.createLinearGradient(0,0,0,H);
+ sky.addColorStop(0,"#e8f1d6");sky.addColorStop(1,"#fff1da");
+ ctx.fillStyle=sky;ctx.fillRect(0,0,W,H);
+
+ // Mây tròn
+ for(let i=0;i<5;i++){
+  const x=((i*235-camera*.18)%(W+180)+W+180)%(W+180)-50;
+  const y=65+(i%3)*35;
+  ctx.fillStyle="#fffdf0b8";
+  ctx.beginPath();ctx.arc(x,y,24,0,Math.PI*2);
+  ctx.arc(x+24,y-10,31,0,Math.PI*2);
+  ctx.arc(x+54,y,23,0,Math.PI*2);ctx.fill();
+ }
+
+ // Đồi pastel
+ for(let layer=0;layer<3;layer++){
+  ctx.fillStyle=["#c9dfb2","#a8ce9c","#91bd8b"][layer];
+  ctx.beginPath();ctx.moveTo(0,H);
+  for(let x=0;x<=W+15;x+=15){
+   const wx=x+camera*(.12+layer*.12);
+   const y=340+layer*40+
+    Math.sin(wx*.006+layer)*24+
+    Math.sin(wx*.013+layer)*13;
+   ctx.lineTo(x,y);
+  }
+  ctx.lineTo(W,H);ctx.closePath();ctx.fill();
+ }
+
+ // Những bông hoa nhỏ
+ for(let i=0;i<24;i++){
+  const x=((i*83-camera*.38)%(W+20)+W+20)%(W+20);
+  const y=390+(i%4)*30;
+  ctx.fillStyle=i%2?"#f2a7c0":"#fff6b8";
+  for(let p=0;p<5;p++){
+   const a=p*Math.PI*2/5;
+   ctx.beginPath();
+   ctx.arc(x+Math.cos(a)*5,y+Math.sin(a)*5,3.5,0,Math.PI*2);ctx.fill();
+  }
+  ctx.fillStyle="#d9a65c";ctx.beginPath();
+  ctx.arc(x,y,2.5,0,Math.PI*2);ctx.fill();
+ }
+}
+
+function drawPlatform(p){
+ const x=p.x-camera;
+ if(x+p.w<0||x>W)return;
+ ctx.strokeStyle="#65473a";ctx.lineWidth=3;
+ ctx.fillStyle="#e8cba5";
+ ctx.beginPath();ctx.roundRect(x,p.y,p.w,p.h,8);ctx.fill();ctx.stroke();
+
+ ctx.fillStyle="#a9ce91";
+ ctx.beginPath();ctx.roundRect(x,p.y-5,p.w,15,7);ctx.fill();
+ ctx.strokeStyle="#65473a";ctx.lineWidth=3;
+ ctx.beginPath();ctx.moveTo(x+6,p.y+3);ctx.lineTo(x+p.w-6,p.y+3);ctx.stroke();
+
+ ctx.strokeStyle="#d3af8a";ctx.lineWidth=2;
+ for(let xx=x+15;xx<x+p.w-8;xx+=34){
+  ctx.beginPath();ctx.moveTo(xx,p.y+21);ctx.lineTo(xx+7,p.y+29);ctx.stroke();
+ }
+}
+
+function drawCoin(c){
+ if(c.got)return;
+ const x=c.x-camera,y=c.y+Math.sin(time*4+c.phase)*3;
+ ctx.save();strokeShape();ctx.fillStyle="#ffdb72";
+ctx.beginPath();ctx.arc(x,y,10,0,Math.PI*2);ctx.fill();ctx.stroke();
+ ctx.fillStyle="#fff0ad";ctx.beginPath();
+ ctx.arc(x-2,y-3,3,0,Math.PI*2);ctx.fill();
+ ctx.strokeStyle="#9d6b46";ctx.lineWidth=2;
+ ctx.beginPath();ctx.moveTo(x,y-5);ctx.lineTo(x,y+5);ctx.stroke();
+ ctx.restore();
+}
+
+function drawGate(){
+ const x=gate.x-camera,y=gate.y;
+ ctx.save();strokeShape();
+ ctx.fillStyle="#f1b8d0";
+ ctx.beginPath();ctx.roundRect(x,y,gate.w,gate.h,19);ctx.fill();ctx.stroke();
+ ctx.fillStyle="#fff5d6";
+ ctx.beginPath();ctx.roundRect(x+7,y+10,gate.w-14,gate.h-10,15);ctx.fill();
+ ctx.font="23px sans-serif";ctx.textAlign="center";
+ ctx.fillText("🌸",x+gate.w/2,y+43);ctx.restore();
+}
+
+function render(){
+ drawBackground();
+ ctx.save();
+ ctx.translate(-camera,0);
+ platforms.forEach(drawPlatform);
+ treasures.forEach(drawCoin);
+ monsters.forEach(drawMonster);
+ drawGate();
+ drawHero(player.x,player.y,time);
+
+ for(const p of particles){
+  ctx.globalAlpha=Math.max(0,p.life/p.max);
+  ctx.fillStyle=p.color;
+  ctx.beginPath();ctx.arc(p.x,p.y,p.r,0,Math.PI*2);ctx.fill();
+ }
+ ctx.globalAlpha=1;
+ ctx.restore();
+}
+
+function loop(now){
+ if(scene!=="playing")return;
+ const dt=Math.min((now-lastTime)/1000||0,.03);
+ lastTime=now;
+ update(dt);
+ if(scene==="playing"){
+  player.walk+=Math.abs(player.vx)*dt*.05;
+  render();requestAnimationFrame(loop);
+ }
+}
+
+function togglePause(){
+ if(scene==="playing"){
+  showScreen("paused","Nghỉ một chút nhé 🌼",
+   "Khi đã sẵn sàng, hãy quay lại cuộc phiêu lưu!",
+   "🍵","Tiếp tục chơi");
+  $("pause").textContent="▶ Tiếp tục";
+ }else if(scene==="paused"){
+  scene="playing";overlay.classList.add("hidden");
+  $("pause").textContent="⏸ Tạm dừng";
+  lastTime=performance.now();requestAnimationFrame(loop);
+ }
+}
+
+function action(){
+ if(scene==="menu"||scene==="over"||scene==="complete"){
+  startGame();return;
+ }
+ if(scene==="paused"){togglePause();return}
+ if(scene==="next"){
+  loadStage(stage+1);scene="playing";overlay.classList.add("hidden");
+  $("pause").textContent="⏸ Tạm dừng";
+  lastTime=performance.now();requestAnimationFrame(loop);
+ }
+}
+
+function setKey(k,on){
+ if(["ArrowLeft","a","A"].includes(k))keys.left=on;
+ if(["ArrowRight","d","D"].includes(k))keys.right=on;
+ if([" ","ArrowUp","w","W"].includes(k)&&on)jumpPressed=true;
+}
+window.addEventListener("keydown",e=>{
+ if(["ArrowLeft","ArrowRight","ArrowUp"," "].includes(e.key))e.preventDefault();
+ if(e.key==="Escape"){togglePause();return}
+ setKey(e.key,true);
+});
+window.addEventListener("keyup",e=>setKey(e.key,false));
+window.addEventListener("blur",()=>{keys.left=keys.right=false});
+
+function holdButton(id,key){
+ const el=$(id);
+ el.addEventListener("pointerdown",e=>{
+  e.preventDefault();
+  if(key==="jump")jumpPressed=true;else keys[key]=true;
+ });
+ const release=e=>{
+  e.preventDefault();if(key!=="jump")keys[key]=false;
+ };
+ el.addEventListener("pointerup",release);
+ el.addEventListener("pointerleave",release);
+el.addEventListener("pointercancel",release);
+}
+holdButton("left","left");
+holdButton("right","right");
+holdButton("jump","jump");
+
+mainButton.addEventListener("click",action);
+$("pause").addEventListener("click",togglePause);
+$("restart").addEventListener("click",startGame);
+$("sound").addEventListener("click",()=>{
+ soundOn=!soundOn;
+ $("sound").textContent=soundOn?"🔊 Âm thanh: Bật":"🔇 Âm thanh: Tắt";
+ if(soundOn)sfx("coin");
+});
+
+loadStage(0);
+render();
+})();
+</script>
+</body>
+</html>
